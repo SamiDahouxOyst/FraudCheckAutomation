@@ -6,7 +6,7 @@
 
 NUMVERIFY_API_TOKEN = "72d8593e02b78207760b1f7a95fe542f";
 
-var cols = {
+var rawCols = {
   createdAt:"A",
   merchant:"C",
   amount:"F",
@@ -16,7 +16,18 @@ var cols = {
   fullName:"O"
 };
 
-var labels = {
+var processedCols = {
+  merchant: "A",
+  amount:"B",
+  phoneNumber:"D",
+  email:"C",
+  fullName:"E",
+  orderId:"F",
+  mailBlacklistRank:"G",
+  phoneBlacklistRank:"H"
+};
+
+var rawLabels = {
   createdAt:"Date de création",
   merchant:"Marchand",
   amount:"Montant €",
@@ -29,6 +40,10 @@ var labels = {
 function runDemo() {
   var document = SpreadsheetApp.getActiveSpreadsheet();
   var data = _extractAll(document);
+  
+  var mailBlacklist = getMailBlacklist();
+  var phoneBlacklist = getPhoneBlacklist();
+  
   _insertNumverifyData(data);
   for(var i = 0; i < data.count; i++) {
     Logger.log(data.createdAt[i]);
@@ -36,17 +51,36 @@ function runDemo() {
   }
 }
 
+function getMailBlacklist() {
+  var document = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = document.getSheetByName("Blacklist Email");
+  document.setActiveSheet(sheet);
+  return _extractValues(document, _allCol("A"), 4742, "String");
+}
+
+function getPhoneBlacklist() {
+  var document = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = document.getSheetByName("Blacklist phone");
+  document.setActiveSheet(sheet);
+  return {
+    countryPrefix:_extractValues(document, _allCol("A"), 70, "Number"),
+    rangeStart:_extractValues(document, _allCol("C"), 70, "Number"),
+    rangeEnd:_extractValues(document, _allCol("D"), 70, "Number")
+  };
+}
+
+
 function _extractAll(document) {
   var count = _countTransactions(document);
   
   return {
     count:count,
-    createdAt:_extractValues(document, _allCol(cols.createdAt), count, "Date"),
-    merchant:_extractValues(document, _allCol(cols.merchant), count, "String"), 
-    amount:_extractValues(document, _allCol(cols.amount), count, "Number"), 
-    phoneNumber:_extractValues(document,_allCol(cols.phoneNumber), count, "String"), 
-    email:_extractValues(document, _allCol(cols.email), count, "String"), 
-    address:_extractValues(document, _allCol(cols.address), count, "String")
+    createdAt:_extractValues(document, _allCol(rawCols.createdAt), count, "Date"),
+    merchant:_extractValues(document, _allCol(rawCols.merchant), count, "String"), 
+    amount:_extractValues(document, _allCol(rawCols.amount), count, "Number"), 
+    phoneNumber:_extractValues(document,_allCol(rawCols.phoneNumber), count, "String"), 
+    email:_extractValues(document, _allCol(rawCols.email), count, "String"), 
+    address:_extractValues(document, _allCol(rawCols.address), count, "String")
   };
 }
 
@@ -66,15 +100,43 @@ function _insertNumverifyData(data) {
   }
 }
 
+function _insertMailBlacklistRank(data) {
+  var mailBlacklist = getMailBlacklist();
+
+  data.rank = [];
+  for(var k = 0; k < data.count; k++) {
+    data.rank.push(-1);
+    for(var i = 0; i < mailBlacklist.length; i++) {
+      if(mailBlacklist[i] == data.email[k].split("@")[1]) {
+        data.rank[k] = i;
+        break;
+      }
+    }
+  }
+}
+
+function _insertPhoneBlacklistRank(data) {
+  var phoneBlacklist = getMailPhonelist();
+
+  // TODO : Implémenter le ranking du numéro de téléphone
+  data.rank = [];
+  for(var k = 0; k < data.count; k++) {
+    data.rank.push(-1);
+    for(var i = 0; i < phoneBlacklist.length; i++) {
+
+    }
+  }
+}
+
 function _countTransactions(document) {
   
   // Dates et nombre de transactions
-  var createdAt = document.getRangeByName(_allCol(cols.createdAt)).getValues();
-  var count = 0;
-  while(createdAt[count + 1] != "") {
+  var createdAt = document.getRangeByName(_allCol(rawCols.createdAt)).getValues();
+  var count = 1;
+  while(createdAt[count] != "") {
     count++;
   }
-  return count;
+  return count - 1;
 }
 
 function _extractValues(document, range, count, type) {
@@ -86,7 +148,12 @@ function _extractValues(document, range, count, type) {
       values[i] = new Date(values[i]);
     }
     else if(type == "Number") {
-      values[i] = Number(values[i][0].split(" ")[0]);
+      values[i] = Number(values[i][0]);
+      
+      // Convertion de devises
+      if(values[i] == undefined) {
+        values[i].split(" ")[0];
+      }
     }
     else if(type == "String") {
       values[i] = String(values[i]);
