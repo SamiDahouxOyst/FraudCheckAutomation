@@ -14,7 +14,9 @@ var rawCols = {
   email:"H",
   address:"M",
   fullName:"O",
+  merchantId:"R",
   orderId:"S"
+  
 };
 
 var processedCols = {
@@ -31,7 +33,8 @@ var processedCols = {
 function onOpen() {
   var spreadsheet = SpreadsheetApp.getActive();
   var menuItems = [
-    {name: 'Process transactions', functionName: 'processTransactions_'},
+    {name: 'Rank transactions', functionName: 'rankTransactions_'},
+    {name: 'Sort transactions', functionName: 'sortTransactions_'}
   ];
   spreadsheet.addMenu('Actions', menuItems);
 }
@@ -43,14 +46,24 @@ function runDemo() {
   _insertMailBlacklistRank(data);
   _insertPhoneBlacklistRank(data);
   // _insertNumverifyData(data);
-  fillProcessedSheet(data);
-    
+
   for(var i = 0; i < data.count; i++) {
     Logger.log(data.createdAt[i]);
     // Logger.log(data.carrier[i]);
     Logger.log(data.mailRank[i]);
     Logger.log(data.phoneRank[i]);
   }
+  fillProcessedSheet(data, "Ranked");
+  
+  var extData = _extractSuspected(document);
+  
+  for(var i = 0; i < extData.count; i++) {
+    Logger.log(extData.createdAt[i]);
+    // Logger.log(data.carrier[i]);
+    Logger.log(extData.mailRank[i]);
+    Logger.log(extData.phoneRank[i]);
+  }
+  fillProcessedSheet(extData, "Sorted");
 }
 
 function getMailBlacklist() {
@@ -72,9 +85,9 @@ function getPhoneBlacklist() {
   };
 }
 
-function fillProcessedSheet(data) {
+function fillProcessedSheet(data, name) {
   var document = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = document.getSheetByName("Processed");
+  var sheet = document.getSheetByName(name);
  
   document.setActiveSheet(sheet);
   Object.keys(processedCols).forEach(function(key){
@@ -86,7 +99,7 @@ function fillProcessedSheet(data) {
   });
 }
 
-function processTransactions_() {
+function rankTransactions_() {
   var document = SpreadsheetApp.getActiveSpreadsheet();
   document.setActiveSheet(document.getSheetByName("Raw"));
   var data = _extractAll(document);
@@ -94,7 +107,18 @@ function processTransactions_() {
   _insertMailBlacklistRank(data);
   _insertPhoneBlacklistRank(data);
   
-  fillProcessedSheet(data);
+  fillProcessedSheet(data, "Ranked");
+}
+
+function sortTransactions_() {
+  var document = SpreadsheetApp.getActiveSpreadsheet();
+  document.setActiveSheet(document.getSheetByName("Raw"));
+  var data = _extractSuspected(document);
+  
+  _insertMailBlacklistRank(data);
+  _insertPhoneBlacklistRank(data);
+
+  fillProcessedSheet(data, "Sorted");
 }
 
 function _extractAll(document) {
@@ -111,8 +135,44 @@ function _extractAll(document) {
     phoneNumber:_extractValues(document,_allCol(rawCols.phoneNumber), count, "String"), 
     email:_extractValues(document, _allCol(rawCols.email), count, "String"), 
     address:_extractValues(document, _allCol(rawCols.address), count, "String"),
+    merchantId:_extractValues(document, _allCol(rawCols.merchantId), count, "String"),
     orderId:_extractValues(document, _allCol(rawCols.orderId), count, "String")
   };
+}
+
+function _extractSuspected(document) {
+  var data = _extractAll(document);
+  var extData = {
+    count:0,
+    merchant:[],
+    createdAt:[],
+    amount:[],
+    phoneNumber:[],
+    email:[],
+    address:[],
+    fullName:[],
+    orderId:[],
+    merchantId:[],
+    phoneRank:[],
+    mailRank:[]
+  }
+  
+  _insertMailBlacklistRank(data);
+  _insertPhoneBlacklistRank(data);
+  
+  for(var i = 0; i < data.count; i++) {
+    if(data.phoneRank[i] == -1 && data.mailRank[i] == -1)
+      continue;
+
+    Object.keys(data).forEach(function(key){
+      if(key == "count")      
+        return;
+      extData[key].push(data[key][i]);
+    });
+  }
+  extData.count = extData.createdAt.length;
+  
+  return extData;
 }
 
 function _insertNumverifyData(data) {
