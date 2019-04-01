@@ -44,10 +44,17 @@ function runDemo() {
   var mailBlacklist = getMailBlacklist();
   var phoneBlacklist = getPhoneBlacklist();
   
-  _insertNumverifyData(data);
+  var sheet = document.getSheetByName("Raw");
+  document.setActiveSheet(sheet);
+  
+  _insertMailBlacklistRank(data);
+  _insertPhoneBlacklistRank(data);
+  // _insertNumverifyData(data);
   for(var i = 0; i < data.count; i++) {
     Logger.log(data.createdAt[i]);
-    Logger.log(data.carrier[i]);
+    // Logger.log(data.carrier[i]);
+    Logger.log(data.mailRank[i]);
+    Logger.log(data.phoneRank[i]);
   }
 }
 
@@ -63,6 +70,7 @@ function getPhoneBlacklist() {
   var sheet = document.getSheetByName("Blacklist phone");
   document.setActiveSheet(sheet);
   return {
+    count: 70,
     countryPrefix:_extractValues(document, _allCol("A"), 70, "Number"),
     rangeStart:_extractValues(document, _allCol("C"), 70, "Number"),
     rangeEnd:_extractValues(document, _allCol("D"), 70, "Number")
@@ -103,12 +111,12 @@ function _insertNumverifyData(data) {
 function _insertMailBlacklistRank(data) {
   var mailBlacklist = getMailBlacklist();
 
-  data.rank = [];
+  data.mailRank = [];
   for(var k = 0; k < data.count; k++) {
-    data.rank.push(-1);
+    data.mailRank.push(-1);
     for(var i = 0; i < mailBlacklist.length; i++) {
       if(mailBlacklist[i] == data.email[k].split("@")[1]) {
-        data.rank[k] = i;
+        data.mailRank[k] = i + 1;
         break;
       }
     }
@@ -116,14 +124,28 @@ function _insertMailBlacklistRank(data) {
 }
 
 function _insertPhoneBlacklistRank(data) {
-  var phoneBlacklist = getMailPhonelist();
+  var phoneBlacklist = getPhoneBlacklist();
 
-  // TODO : Implémenter le ranking du numéro de téléphone
-  data.rank = [];
+  data.phoneRank = [];
+  var prefix2, prefix3, range;
   for(var k = 0; k < data.count; k++) {
-    data.rank.push(-1);
-    for(var i = 0; i < phoneBlacklist.length; i++) {
-
+    prefix2 = Number(data.phoneNumber[k].slice(0, 2)); // Indicatif de pays à 2 numéros. ex : 33
+    prefix3 = Number(data.phoneNumber[k].slice(0, 3)); // Indicatif de pays à 3 numéros. ex : 212
+    
+    data.phoneRank.push(-1);
+    for(var i = 0; i < phoneBlacklist.count; i++) {
+      if(phoneBlacklist.countryPrefix[i] == prefix2 || phoneBlacklist.countryPrefix[i] == prefix3) {
+        if(prefix2 != 33) {
+          data.phoneRank[k] = i + 1;
+          break;
+        } else {
+          range = Number(data.phoneNumber[k].slice(3));
+          if(range >= phoneBlacklist.rangeStart[i] && range <= phoneBlacklist.rangeEnd[i]) {
+            data.phoneRank[k] = i + 1;
+            break;
+          }
+        }
+      }
     }
   }
 }
