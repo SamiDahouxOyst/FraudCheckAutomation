@@ -1,10 +1,23 @@
 /**
  * @author Dahoux Sami sami.dahoux@oyst.com
  * @date 24 Mars 2019
- * @brief Automatisation de la vérificaiton de fraude
-**/
+ * @brief Fraude check automation
+ * @details 
+ * Processes transaction to validate and displays the suspected ones that require manual check.
+ *
+ * Checks transactions using Oyst transactions fraud scoring documented here :
+ * https://confluence.oyst.io/display/PT/Fraud+Management+and+Fraud+Scoring
+ * 
+ * NB : Use that code on the following spreadsheet : 
+ * https://docs.google.com/spreadsheets/d/1GenNWP31LY-DIBrpREzE5uSR9K6Bsh_kE_Fnp2XNw_4/edit#gid=478485810
+ * 
+ */
 
 NUMVERIFY_API_TOKEN = "72d8593e02b78207760b1f7a95fe542f";
+
+/**
+ * @brief Columns positions in sheets
+ */ 
 
 var rawCols = {
   createdAt:"A",
@@ -30,6 +43,24 @@ var processedCols = {
   phoneRank:"H"
 };
 
+/**
+ * @brief AOV sorted by merchantId
+ */
+var merchantAOV = {
+  "f660bf1e-2333-4fe3-9473-b0fce7c0019d":80, // juliendorecel
+  "1e7b2b33-cf87-41f2-a3c1-41e8ee3402ae":30, // louis-herboristerie
+  "3c406813-17f0-4ff7-8622-16afb45df12b":40, // vetomalin
+  "70cd921f-17a8-4846-962d-b177690d491d":60, // peyrouse-hair-shop
+  "85f3b517-dd80-48a2-bf1f-5dcfd4eb634b":50, // lactolerance
+}
+
+/**
+ * @brief strength of fraud scoring in terms of amount scoring, in ]0, 1].
+ */
+var transactionAmountTol = 0.5;
+
+var document;
+
 function onOpen() {
   var spreadsheet = SpreadsheetApp.getActive();
   var menuItems = [
@@ -39,57 +70,119 @@ function onOpen() {
   spreadsheet.addMenu('Actions', menuItems);
 }
 
-function runDemo() {
-  var document = SpreadsheetApp.getActiveSpreadsheet();
-  var data = _extractAll(document);
-
+function runDemoRanked() {
+  document = SpreadsheetApp.getActiveSpreadsheet();
+  var data = _extractAll();
+  
   _insertMailBlacklistRank(data);
   _insertPhoneBlacklistRank(data);
-  // _insertNumverifyData(data);
-
+  _insertIsBlacklistedMerchant(data);
+  
   for(var i = 0; i < data.count; i++) {
     Logger.log(data.createdAt[i]);
-    // Logger.log(data.carrier[i]);
     Logger.log(data.mailRank[i]);
     Logger.log(data.phoneRank[i]);
+    Logger.log(data.isBlacklisted[i]);
   }
   fillProcessedSheet(data, "Ranked");
-  
-  var extData = _extractSuspected(document);
+  document.setActiveSheet(document.getSheetByName("Ranked"));
+}
+
+function runDemoSorted() {
+  document = SpreadsheetApp.getActiveSpreadsheet();
+  var extData = _extractSuspected();
   
   for(var i = 0; i < extData.count; i++) {
     Logger.log(extData.createdAt[i]);
-    // Logger.log(data.carrier[i]);
     Logger.log(extData.mailRank[i]);
     Logger.log(extData.phoneRank[i]);
+    Logger.log(extData.isBlacklisted[i]);
   }
   fillProcessedSheet(extData, "Sorted");
+  document.setActiveSheet(document.getSheetByName("Sorted"));
 }
 
-function getMailBlacklist() {
-  var document = SpreadsheetApp.getActiveSpreadsheet();
-  document.setActiveSheet(document.getSheetByName("Blacklist Email"));
+/**
+ * @brief Ranks transactions and fill Ranked sheet
+ * @details Fill Raw sheet with transactions so this function can extract data and process it
+ * 
+ */
+function rankTransactions_() {
+  document = SpreadsheetApp.getActiveSpreadsheet();
+  var data = _extractAll();
   
-  return _extractValues(document, _allCol("A"), 4742, "String");
+  _insertMailBlacklistRank(data);
+  _insertPhoneBlacklistRank(data);
+  _insertIsBlacklistedMerchant(data);
+  
+  fillProcessedSheet(data, "Ranked");
+  document.setActiveSheet(document.getSheetByName("Ranked"));
 }
 
+/**
+ * @brief Ranks transactions and fill Sorted sheet with suspected ones
+ * @details Fill Raw sheet with transactions so this function can extract data and process it
+ * The Sorted and Ranked sheets have the same data format but Sorted contains only suspected transactions,
+ * theses ones require manual check.
+ * 
+ */
+function sortTransactions_() {
+  document = SpreadsheetApp.getActiveSpreadsheet();
+  var data = _extractSuspected();
+  
+  _insertMailBlacklistRank(data);
+  _insertPhoneBlacklistRank(data);
+  _insertIsBlacklistedMerchant(data);
+
+  fillProcessedSheet(data, "Sorted");
+  document.setActiveSheet(document.getSheetByName("Sorted"));
+}
+
+/**
+ * @brief extract values from Blacklist Email sheet
+ * @return array with mail address sufix from the mail blacklist
+ */
+function getMailBlacklist() {
+  var sheet = document.getSheetByName("Blacklist Email");
+  return _extractValues(sheet, "A", 4742, "String");
+}
+
+/**
+ * @brief extract values from Blacklist Phone sheet
+ * @return object arrray with country prefix, starting range and ending range from the phone blacklist
+ */
 function getPhoneBlacklist() {
-  var document = SpreadsheetApp.getActiveSpreadsheet();
-  document.setActiveSheet(document.getSheetByName("Blacklist phone"));
+  var sheet = document.getSheetByName("Blacklist phone");
   
   return {
     count: 70,
-    countryPrefix:_extractValues(document, _allCol("A"), 70, "Number"),
-    rangeStart:_extractValues(document, _allCol("C"), 70, "Number"),
-    rangeEnd:_extractValues(document, _allCol("D"), 70, "Number")
+    countryPrefix:_extractValues(sheet, "A", 70, "Number"),
+    rangeStart:_extractValues(sheet, "C", 70, "Number"),
+    rangeEnd:_extractValues(sheet, "D", 70, "Number")
   };
 }
 
+/**
+ * @brief extract values from Blacklist Merchant sheet
+ * @return array with merchant ids from the merchant blacklist
+ */
+function getMerchantBlacklist() {
+  var sheet = document.getSheetByName("Blacklist merchant");  
+  return _extractValues(sheet, "A", 1, "String");
+}
+
+/**
+ * @brief Fills a sheet with processed data
+ * @param data object array containing transactions rows
+ * @param name string containing the name of the sheet to be filled
+ * @details 
+ * data object must define the same properties as processedCols object.
+ * name string must be the name of an existing sheet.
+ *
+ */
 function fillProcessedSheet(data, name) {
-  var document = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = document.getSheetByName(name);
- 
-  document.setActiveSheet(sheet);
+  
   Object.keys(processedCols).forEach(function(key){
     if(key == "count") 
       return;
@@ -99,49 +192,37 @@ function fillProcessedSheet(data, name) {
   });
 }
 
-function rankTransactions_() {
-  var document = SpreadsheetApp.getActiveSpreadsheet();
-  document.setActiveSheet(document.getSheetByName("Raw"));
-  var data = _extractAll(document);
-  
-  _insertMailBlacklistRank(data);
-  _insertPhoneBlacklistRank(data);
-  
-  fillProcessedSheet(data, "Ranked");
-}
-
-function sortTransactions_() {
-  var document = SpreadsheetApp.getActiveSpreadsheet();
-  document.setActiveSheet(document.getSheetByName("Raw"));
-  var data = _extractSuspected(document);
-  
-  _insertMailBlacklistRank(data);
-  _insertPhoneBlacklistRank(data);
-
-  fillProcessedSheet(data, "Sorted");
-}
-
-function _extractAll(document) {
-  document.setActiveSheet(document.getSheetByName("Raw"));
-  
-  var count = _countTransactions(document);
+/**
+ * @brief extracts all transactions from Raw sheet
+ * @return object array containing values of rows
+ */
+function _extractAll() {
+  var sheet = document.getSheetByName("Raw");
+  var count = _countTransactions();
   
   return {
     count:count,
-    createdAt:_extractValues(document, _allCol(rawCols.createdAt), count, "Date"),
-    fullName:_extractValues(document, _allCol(rawCols.fullName), count, "String"),
-    merchant:_extractValues(document, _allCol(rawCols.merchant), count, "String"), 
-    amount:_extractValues(document, _allCol(rawCols.amount), count, "Currency"), 
-    phoneNumber:_extractValues(document,_allCol(rawCols.phoneNumber), count, "String"), 
-    email:_extractValues(document, _allCol(rawCols.email), count, "String"), 
-    address:_extractValues(document, _allCol(rawCols.address), count, "String"),
-    merchantId:_extractValues(document, _allCol(rawCols.merchantId), count, "String"),
-    orderId:_extractValues(document, _allCol(rawCols.orderId), count, "String")
+    createdAt:_extractValues(sheet, rawCols.createdAt, count, "Date"),
+    fullName:_extractValues(sheet, rawCols.fullName, count, "String"),
+    merchant:_extractValues(sheet, rawCols.merchant, count, "String"), 
+    amount:_extractValues(sheet, rawCols.amount, count, "Currency"), 
+    phoneNumber:_extractValues(sheet,rawCols.phoneNumber, count, "String"), 
+    email:_extractValues(sheet, rawCols.email, count, "String"), 
+    address:_extractValues(sheet, rawCols.address, count, "String"),
+    merchantId:_extractValues(sheet, rawCols.merchantId, count, "String"),
+    orderId:_extractValues(sheet, rawCols.orderId, count, "String")
   };
 }
 
-function _extractSuspected(document) {
-  var data = _extractAll(document);
+/**
+ * @brief extracts supected transactions from Raw sheet
+ * @details 
+ * The values are filtered from the output of _extractAll function acording to fraud scoring. 
+ * Only supsicious transactions are returned.
+ * @return object array containing values of rows
+ */
+function _extractSuspected() {
+  var data = _extractAll();
   var extData = {
     count:0,
     merchant:[],
@@ -154,16 +235,21 @@ function _extractSuspected(document) {
     orderId:[],
     merchantId:[],
     phoneRank:[],
-    mailRank:[]
+    mailRank:[],
+    isBlacklisted:[]
   }
   
   _insertMailBlacklistRank(data);
   _insertPhoneBlacklistRank(data);
+  _insertIsBlacklistedMerchant(data);
   
   for(var i = 0; i < data.count; i++) {
-    if(data.phoneRank[i] == -1 && data.mailRank[i] == -1)
+    if(data.phoneRank[i] == -1 && 
+       data.mailRank[i] == -1 && 
+       data.isBlacklisted[i] == false &&
+       data.amount[i] < (1.0 / transactionAmountTol) * merchantAOV[data.merchantId[i]])
       continue;
-
+  
     Object.keys(data).forEach(function(key){
       if(key == "count")      
         return;
@@ -175,6 +261,14 @@ function _extractSuspected(document) {
   return extData;
 }
 
+/**
+ * @brief Inserts carrier fetched from numverify into data object
+ * @param data object array containing transactions rows
+ * @details 
+  *data object is modified after the execution. 
+ * data object must at least have the properties of rawCols object.
+ *
+ */
 function _insertNumverifyData(data) {
   
   data.carrier = [];
@@ -191,6 +285,15 @@ function _insertNumverifyData(data) {
   }
 }
 
+/**
+ * @brief Inserts mail rank from mail blacklist sheet into data object
+ * @param data object array containing transactions rows
+ * @details 
+ * data object is modified after the execution. 
+ * data object must at least have the properties of rawCols object.
+ * The mail blacklist sheet must be ordered by over-representation over datasets.
+ *
+ */
 function _insertMailBlacklistRank(data) {
   var mailBlacklist = getMailBlacklist();
 
@@ -206,6 +309,15 @@ function _insertMailBlacklistRank(data) {
   }
 }
 
+/**
+ * @brief Inserts phone rank from mail blacklist sheet into data object
+ * @param data object array containing transactions rows
+ * @details 
+ * data object is modified after the execution. 
+ * data object must at least have the properties of rawCols object.
+ * The phone blacklist sheet must be ordered by over-representation over datasets.
+ *
+ */
 function _insertPhoneBlacklistRank(data) {
   var phoneBlacklist = getPhoneBlacklist();
 
@@ -233,10 +345,25 @@ function _insertPhoneBlacklistRank(data) {
   }
 }
 
-function _countTransactions(document) {
+/**
+ * @brief Inserts phone rank from merchant blacklist sheet into data object
+ * @param data object array containing transactions rows
+ * @details 
+ * data object is modified after the execution. 
+ * data object must at least have the properties of rawCols object.
+ */
+function _insertIsBlacklistedMerchant(data) {
+  var merchantBlacklist = getMerchantBlacklist();
   
-  // Dates et nombre de transactions
-  var createdAt = document.getRangeByName(_allCol(rawCols.createdAt)).getValues();
+  data.isBlacklisted = []
+  for(var k = 0; k < data.count; k++) {
+    data.isBlacklisted.push(merchantBlacklist.indexOf(data.merchantId[k]) != -1);
+  }
+}
+
+function _countTransactions() {
+  var sheet = document.getSheetByName("Raw");
+  var createdAt = sheet.getRange(_allCol(rawCols.createdAt)).getValues();
   var count = 1;
   while(createdAt[count] != "") {
     count++;
@@ -244,10 +371,10 @@ function _countTransactions(document) {
   return count - 1;
 }
 
-function _extractValues(document, range, count, type) {
-  var values = document.getRangeByName(range).getValues().slice(1, count + 1);
+function _extractValues(sheet, col, count, type) {
+  var values = sheet.getRange(_allCol(col)).getValues().slice(1, count + 1);
   
-  // Conversion des colonnes en types javascript
+  // Converts columns in array of js types
   for(var i = 0; i < count; i++) {
     if(type == "Date") {
       values[i] = new Date(values[i]);
@@ -260,9 +387,6 @@ function _extractValues(document, range, count, type) {
     }
     else if(type == "String") {
       values[i] = String(values[i]);
-    }
-    else {
-      Logger.log("_extractValues failed : unknown type ");
     }
   }
   return values;
