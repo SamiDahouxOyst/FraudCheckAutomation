@@ -28,8 +28,19 @@ var rawCols = {
   address:"M",
   fullName:"O",
   merchantId:"R",
-  orderId:"S"
-  
+  orderId:"S" 
+};
+
+var rawTypes = {
+  createdAt:"Date",
+  merchant:"String",
+  amount:"Currency",
+  phoneNumber:"String",
+  email:"String",
+  address:"String",
+  fullName:"String",
+  merchantId:"String",
+  orderId:"String" 
 };
 
 var processedCols = {
@@ -129,10 +140,6 @@ function rankTransactions_() {
 function sortTransactions_() {
   document = SpreadsheetApp.getActiveSpreadsheet();
   var data = _extractSuspected();
-  
-  _insertMailBlacklistRank(data);
-  _insertPhoneBlacklistRank(data);
-  _insertIsBlacklistedMerchant(data);
 
   fillProcessedSheet(data, "Sorted");
   document.setActiveSheet(document.getSheetByName("Sorted"));
@@ -186,7 +193,6 @@ function fillProcessedSheet(data, name) {
   Object.keys(processedCols).forEach(function(key){
     if(key == "count") 
       return;
-    
     range = sheet.getRange(processedCols[key] + "2:" + processedCols[key] + (data.count + 1));
     range.setValues(_prepareForRange(data[key]));
   });
@@ -200,18 +206,11 @@ function _extractAll() {
   var sheet = document.getSheetByName("Raw");
   var count = _countTransactions();
   
-  return {
-    count:count,
-    createdAt:_extractValues(sheet, rawCols.createdAt, count, "Date"),
-    fullName:_extractValues(sheet, rawCols.fullName, count, "String"),
-    merchant:_extractValues(sheet, rawCols.merchant, count, "String"), 
-    amount:_extractValues(sheet, rawCols.amount, count, "Currency"), 
-    phoneNumber:_extractValues(sheet,rawCols.phoneNumber, count, "String"), 
-    email:_extractValues(sheet, rawCols.email, count, "String"), 
-    address:_extractValues(sheet, rawCols.address, count, "String"),
-    merchantId:_extractValues(sheet, rawCols.merchantId, count, "String"),
-    orderId:_extractValues(sheet, rawCols.orderId, count, "String")
-  };
+  var data = {count:count};
+  Object.keys(rawCols).forEach(function(key){
+      data[key] = _extractValues(sheet, rawCols[key], count, rawTypes[key]);
+  });
+  return data;
 }
 
 /**
